@@ -27,6 +27,11 @@ Requires the `screensaver` plugin kind, proposed upstream in
 Until that lands, use the `main` branch of this repo, which ships its own idle
 service instead.
 
+> **On an unpatched Omarchy this branch installs but does nothing.** The stock
+> plugin validator skips kinds it does not recognise rather than rejecting them,
+> so `omarchy plugin add` reports success and the shell then ignores the plugin.
+> There is no error to tell you why the toasters never appear. Use `main`.
+
 ## Uninstall
 
 ```bash
