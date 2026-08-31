@@ -1,0 +1,513 @@
+#!/usr/bin/env bash
+# flying-toasters — a terminal tribute to the After Dark screensaver.
+#
+# Toasters flap their way from the top-right of the screen to the bottom-left,
+# trailed by the occasional slice of toast. Any keypress quits.
+#
+# Tunables (env):
+#   FLYING_TOASTERS_DELAY   frame delay in seconds        (default 0.07)
+#   FLYING_TOASTERS_MAX     max simultaneous sprites      (default 9)
+#   FLYING_TOASTERS_SPAWN   spawn chance per frame, %     (default 18)
+#   FLYING_TOASTERS_TOAST   chance a spawn is toast, %    (default 25)
+#   FLYING_TOASTERS_GRACE   frames to ignore input at start (default 15)
+#   FLYING_TOASTERS_SCREENSAVER=1
+#       screensaver mode: hides the Hyprland hardware cursor, dismisses on
+#       mouse movement, and exits when the screensaver window loses focus.
+
+set -u
+
+# The sprite art uses block-drawing characters, and the clipping code slices
+# strings by index. Under a C locale bash counts bytes rather than characters,
+# which would shear every sprite, so insist on UTF-8 if we inherited otherwise.
+case ${LC_ALL:-${LC_CTYPE:-${LANG:-}}} in
+*[Uu][Tt][Ff]*) ;;
+*) export LC_ALL=C.UTF-8 ;;
+esac
+
+DELAY=${FLYING_TOASTERS_DELAY:-0.07}
+MAX_SPRITES=${FLYING_TOASTERS_MAX:-5}
+SPAWN_PCT=${FLYING_TOASTERS_SPAWN:-18}
+TOAST_PCT=${FLYING_TOASTERS_TOAST:-25}
+SCREENSAVER=${FLYING_TOASTERS_SCREENSAVER:-0}
+GRACE_FRAMES=${FLYING_TOASTERS_GRACE:-15}
+MOUSE_TOLERANCE=2
+SCREENSAVER_CLASS=${FLYING_TOASTERS_CLASS:-org.omarchy.screensaver}
+
+ESC=$'\e'
+
+# --- sprites ---------------------------------------------------------------
+# Every frame of a kind shares one bounding box, so erasing a sprite is just
+# blanking a rectangle. Rows are padded to the full width.
+#
+# Modelled on the 1989 After Dark sprite: a chrome top over an olive body, two
+# lengthwise slots glowing orange, and a broad wing rooted against each body
+# wall. Each toaster is stacked back to front -- far wing, side, body, top,
+# slots, near wing.
+TOASTER_W=30
+TOASTER_H=11
+
+TOASTER_TOP=(
+'                              '
+'                              '
+'           ___________        '
+'          /█       █/         '
+'         /█       █/          '
+'        /_________/           '
+'                              '
+'                              '
+'                              '
+'                              '
+'                              '
+)
+TOASTER_BODY=(
+'                              '
+'                              '
+'                              '
+'                     |        '
+'                     |        '
+'                     |        '
+'        |▓▓▓▓▓▓▓▓▓|  |        '
+'        |▒▒▒▒▒▒▒▒▒| /         '
+'        |░░░░░░░░░|/          '
+'        |_________|           '
+'                              '
+)
+TOASTER_SIDE=(
+'                              '
+'                              '
+'                              '
+'                              '
+'                    ▒         '
+'                   ▒▒         '
+'                   ▒▒         '
+'                   ▒          '
+'                              '
+'                              '
+'                              '
+)
+TOASTER_SLOT=(
+'                              '
+'                              '
+'                              '
+'            ▄▄▄▄▄▄▄           '
+'           ▄▄▄▄▄▄▄            '
+'                              '
+'                              '
+'                              '
+'                              '
+'                              '
+'                              '
+)
+
+TOASTER_FAR_0=(
+'▄███                          '
+'▄▓▓▓▓▓                        '
+' ▄█████                       '
+'   ▄▓▓▓▓                      '
+'    ▄███                      '
+'      ▓▓                      '
+'                              '
+'                              '
+'                              '
+'                              '
+'                              '
+)
+TOASTER_NEAR_0=(
+'                          ███▄'
+'                        ▓▓▓▓▓▄'
+'                       █████▄ '
+'                      ▓▓▓▓▄   '
+'                      ███▄    '
+'                      ▓▓      '
+'                              '
+'                              '
+'                              '
+'                              '
+'                              '
+)
+TOASTER_FAR_1=(
+'                              '
+'                              '
+'▄████                         '
+'▄▓▓▓▓▓▓                       '
+' ▄██████                      '
+'    ▓▓▓▓                      '
+'                              '
+'                              '
+'                              '
+'                              '
+'                              '
+)
+TOASTER_NEAR_1=(
+'                              '
+'                              '
+'                         ████▄'
+'                       ▓▓▓▓▓▓▄'
+'                      ██████▄ '
+'                      ▓▓▓▓    '
+'                              '
+'                              '
+'                              '
+'                              '
+'                              '
+)
+TOASTER_FAR_2=(
+'                              '
+'                              '
+'                              '
+'                              '
+'                              '
+'    ████                      '
+' ▀▓▓▓▓▓▓                      '
+'▀██████                       '
+'▀▓▓▓▓                         '
+'                              '
+'                              '
+)
+TOASTER_NEAR_2=(
+'                              '
+'                              '
+'                              '
+'                              '
+'                              '
+'                      ████    '
+'                   ▓▓▓▓▓▓▀    '
+'                    ██████▀   '
+'                      ▓▓▓▓▀   '
+'                              '
+'                              '
+)
+TOASTER_FAR_3=(
+'                              '
+'                              '
+'                              '
+'                              '
+'                              '
+'      ██                      '
+'    ▀▓▓▓                      '
+'   ▀████                      '
+' ▀▓▓▓▓▓                       '
+'▀█████                        '
+'▀▓▓▓                          '
+)
+TOASTER_NEAR_3=(
+'                              '
+'                              '
+'                              '
+'                              '
+'                              '
+'                      ██      '
+'                   ▓▓▓▀       '
+'                   ████▀      '
+'                    ▓▓▓▓▓▀    '
+'                     █████▀   '
+'                       ▓▓▓▀   '
+)
+
+# Ping-pong through the four positions so the flap goes up and back down.
+FLAP_SEQ=(0 1 2 3 2 1)
+
+# A slice, lying in the same isometric plane as the toasters.
+TOAST_W=11
+TOAST_H=5
+TOAST_FACE=(
+'           '
+'   ▓   ▓▓  '
+'  ▓   ▓▓   '
+' ▓▓▓▓▓▓    '
+'           '
+)
+TOAST_CORE=(
+'           '
+'    ▓▓▓    '
+'   ▓▓▓     '
+'           '
+'           '
+)
+TOAST_RIM=(
+'   ________'
+'  /      / '
+' /      /  '
+'/      /   '
+'           '
+)
+TOAST_CRUST=(
+'           '
+'          ▒'
+'         ▒ '
+'        ▒  '
+'▒▒▒▒▒▒▒▒   '
+)
+
+# Colours sampled from the original 1989 After Dark sprite sheet, emitted as
+# 24-bit truecolor. Roles: top, side, slot, far wing, near wing.
+PAL_NEAR=($'\e[38;2;240;240;240m' $'\e[38;2;122;122;122m' $'\e[38;2;204;51;0m' $'\e[38;2;186;186;186m' $'\e[38;2;255;255;255m')
+PAL_FAR=($'\e[38;2;120;120;120m' $'\e[38;2;61;61;61m' $'\e[38;2;102;26;0m' $'\e[38;2;134;134;134m' $'\e[38;2;184;184;184m')
+# The body is shaded per row: chrome dome above, olive base below.
+BODY_NEAR=($'\e[38;2;0;0;0m' $'\e[38;2;0;0;0m' $'\e[38;2;0;0;0m' $'\e[38;2;158;158;158m' $'\e[38;2;158;158;158m' $'\e[38;2;158;158;158m' $'\e[38;2;212;212;212m' $'\e[38;2;168;168;168m' $'\e[38;2;163;163;82m' $'\e[38;2;130;130;64m' $'\e[38;2;0;0;0m')
+BODY_FAR=($'\e[38;2;0;0;0m' $'\e[38;2;0;0;0m' $'\e[38;2;0;0;0m' $'\e[38;2;79;79;79m' $'\e[38;2;79;79;79m' $'\e[38;2;79;79;79m' $'\e[38;2;106;106;106m' $'\e[38;2;84;84;84m' $'\e[38;2;82;82;41m' $'\e[38;2;65;65;32m' $'\e[38;2;0;0;0m')
+# Toast, by role: face, toasted core, rim, crust. Three settings of the
+# darkness slider the original shipped with.
+TOAST_0_NEAR=($'\e[38;2;255;233;160m' $'\e[38;2;255;204;102m' $'\e[38;2;232;192;112m' $'\e[38;2;179;125;26m')
+TOAST_0_FAR=($'\e[38;2;168;154;106m' $'\e[38;2;168;135;67m' $'\e[38;2;153;127;74m' $'\e[38;2;118;82;26m')
+TOAST_1_NEAR=($'\e[38;2;255;204;102m' $'\e[38;2;153;102;0m' $'\e[38;2;204;153;51m' $'\e[38;2;138;90;0m')
+TOAST_1_FAR=($'\e[38;2;168;135;67m' $'\e[38;2;101;67;26m' $'\e[38;2;135;101;34m' $'\e[38;2;91;59;26m')
+TOAST_2_NEAR=($'\e[38;2;204;153;51m' $'\e[38;2;102;51;0m' $'\e[38;2;153;102;0m' $'\e[38;2;77;38;0m')
+TOAST_2_FAR=($'\e[38;2;135;101;34m' $'\e[38;2;67;34;26m' $'\e[38;2;101;67;26m' $'\e[38;2;51;26;26m')
+
+# --- terminal state --------------------------------------------------------
+hw_cursor() { # $1 = true|false  (invisible)
+  [[ $SCREENSAVER == 1 ]] || return 0
+  command -v hyprctl >/dev/null 2>&1 || return 0
+  hyprctl eval "hl.config({ cursor = { invisible = $1 } })" &>/dev/null ||
+    hyprctl keyword cursor:invisible "$1" &>/dev/null || true
+}
+
+cleanup() {
+  trap - EXIT
+  printf '%s[?1003l%s[?25h%s[0m' "$ESC" "$ESC" "$ESC"
+  [[ $SCREENSAVER == 1 ]] && printf '\033]111\007'   # restore theme background
+  hw_cursor false
+  clear
+  exit 0
+}
+trap cleanup SIGINT SIGTERM SIGHUP SIGQUIT EXIT
+
+resize() {
+  COLS=$(tput cols)
+  ROWS=$(tput lines)
+  printf '%s[2J' "$ESC"
+}
+trap resize SIGWINCH
+
+# --- sprite state (parallel arrays) ----------------------------------------
+declare -a sx sy skind sspeed sflap spx spy sdone  # x y kind speed flap prev_x prev_y doneness
+
+add_sprite() {
+  local i=${#sx[@]}
+  sx[i]=$1 sy[i]=$2 skind[i]=$3 sspeed[i]=$4 sflap[i]=0 spx[i]=$1 spy[i]=$2 sdone[i]=$5
+}
+
+spawn() {
+  local kind=toaster x y speed doneness=1
+  ((RANDOM % 100 < TOAST_PCT)) && kind=toast
+  # Not every slice comes out the same: mostly golden, some pale, some singed.
+  case $((RANDOM % 4)) in
+  0) doneness=0 ;;
+  3) doneness=2 ;;
+  esac
+  speed=$((1 + RANDOM % 2))
+  if ((RANDOM % 2)); then           # in over the top edge
+    x=$((COLS / 3 + RANDOM % (COLS - COLS / 3 + 10)))
+    y=$((-TOASTER_H - RANDOM % 4))
+  else                              # in from the right edge
+    x=$((COLS + RANDOM % 8))
+    y=$((RANDOM % (ROWS / 2 + 1)))
+  fi
+  add_sprite "$x" "$y" "$kind" "$speed" "$doneness"
+}
+
+# Append a positioned, clipped string to the frame buffer.
+add() { # $1=row $2=col $3=text $4=color
+  local y=$1 x=$2 s=$3 c=$4 len
+  ((y < 0 || y >= ROWS)) && return
+  len=${#s}
+  if ((x < 0)); then
+    ((x + len <= 0)) && return
+    s=${s:$((-x))}
+    x=0
+    len=${#s}
+  fi
+  ((x >= COLS)) && return
+  ((x + len > COLS)) && s=${s:0:COLS - x}
+  [[ -z $s ]] && return
+  BUF+="${ESC}[$((y + 1));$((x + 1))H${c}${s}"
+}
+
+# Draw one sprite row, treating spaces as transparent, so that overlapping
+# sprites do not punch rectangular holes in each other.
+blit_line() { # $1=row $2=col $3=text $4=color
+  local y=$1 x=$2 s=$3 c=$4 i=0 start
+  ((y < 0 || y >= ROWS)) && return
+  while ((i < ${#s})); do
+    if [[ ${s:i:1} == ' ' ]]; then
+      ((i++))
+      continue
+    fi
+    start=$i
+    while ((i < ${#s})) && [[ ${s:i:1} != ' ' ]]; do ((i++)); done
+    add "$y" "$((x + start))" "${s:start:i - start}" "$c"
+  done
+}
+
+erase_at() { # $1=row $2=col $3=kind
+  local h w r blank
+  if [[ $3 == toast ]]; then
+    h=$TOAST_H w=$TOAST_W
+  else
+    h=$TOASTER_H w=$TOASTER_W
+  fi
+  printf -v blank '%*s' "$w" ''
+  for ((r = 0; r < h; r++)); do
+    add "$(($1 + r))" "$2" "$blank" ''
+  done
+}
+
+draw_at() { # $1=row $2=col $3=kind $4=speed $5=flap $6=doneness
+  local r far near
+  if [[ $3 == toast ]]; then
+    if (($4 > 1)); then
+      local -n tp=TOAST_${6}_NEAR
+    else
+      local -n tp=TOAST_${6}_FAR
+    fi
+    for ((r = 0; r < TOAST_H; r++)); do
+      blit_line "$(($1 + r))" "$2" "${TOAST_FACE[r]}" "${tp[0]}"
+      blit_line "$(($1 + r))" "$2" "${TOAST_CORE[r]}" "${tp[1]}"
+      blit_line "$(($1 + r))" "$2" "${TOAST_RIM[r]}" "${tp[2]}"
+      blit_line "$(($1 + r))" "$2" "${TOAST_CRUST[r]}" "${tp[3]}"
+    done
+    return
+  fi
+
+  if (($4 > 1)); then
+    local -n pal=PAL_NEAR
+    local -n bsh=BODY_NEAR
+  else
+    local -n pal=PAL_FAR
+    local -n bsh=BODY_FAR
+  fi
+
+  local phase=${FLAP_SEQ[$((($5 / 2) % ${#FLAP_SEQ[@]}))]}
+  far=TOASTER_FAR_$phase near=TOASTER_NEAR_$phase
+  local -n far_rows=$far
+  local -n near_rows=$near
+
+  # Back to front. blit_line leaves spaces transparent, so each pass only marks
+  # its own glyphs and later layers sit on top of earlier ones.
+  for ((r = 0; r < TOASTER_H; r++)); do
+    blit_line "$(($1 + r))" "$2" "${far_rows[r]}" "${pal[3]}"
+    blit_line "$(($1 + r))" "$2" "${TOASTER_SIDE[r]}" "${pal[1]}"
+    blit_line "$(($1 + r))" "$2" "${TOASTER_BODY[r]}" "${bsh[r]}"
+    blit_line "$(($1 + r))" "$2" "${TOASTER_TOP[r]}" "${pal[0]}"
+    blit_line "$(($1 + r))" "$2" "${TOASTER_SLOT[r]}" "${pal[2]}"
+    blit_line "$(($1 + r))" "$2" "${near_rows[r]}" "${pal[4]}"
+  done
+}
+
+still_focused() {
+  [[ $SCREENSAVER == 1 ]] || return 0
+  command -v hyprctl >/dev/null 2>&1 || return 0
+  hyprctl activewindow -j 2>/dev/null |
+    jq -e --arg c "$SCREENSAVER_CLASS" '.class == $c' >/dev/null 2>&1
+}
+
+# Wait out one frame delay, and decide whether what arrived dismisses us.
+# A keypress always does. Mouse motion does too, but only after the grace
+# period and only once a couple of reports have accumulated, so that a single
+# phantom report from the window mapping under the pointer is not enough.
+read_input() {
+  local key rest c
+  if [[ ! -t 0 ]]; then
+    sleep "$DELAY"
+    return
+  fi
+
+  read -rsn1 -t "$DELAY" key || return 0      # nothing arrived: just a frame
+  ((tick < GRACE_FRAMES)) && return 0         # still settling: ignore it
+
+  if [[ $key == "$ESC" ]]; then
+    rest=''
+    while ((${#rest} < 16)) && read -rsn1 -t 0.01 c; do rest+=$c; done
+    if ((mouse_on)) && [[ $rest == '[M'* || $rest == '[<'* ]]; then
+      mouse_events=$((mouse_events + 1))
+      ((mouse_events > MOUSE_TOLERANCE)) && cleanup
+      return 0
+    fi
+  fi
+
+  cleanup
+}
+
+# --- go --------------------------------------------------------------------
+resize
+printf '%s[?25l' "$ESC"                       # hide cursor
+
+# Paint the terminal black rather than inheriting the theme background, the way
+# the stock Omarchy screensaver does -- chrome toasters want a night sky.
+[[ $SCREENSAVER == 1 ]] && printf '\033]11;rgb:00/00/00\007'
+
+hw_cursor true
+
+# Mouse reporting is switched on later, once GRACE_FRAMES have passed. A
+# fullscreen window mapping under the pointer makes the terminal emit a motion
+# report immediately, and turning reporting on here would let that phantom
+# "movement" dismiss the screensaver before its first frame is even drawn.
+mouse_on=0
+mouse_events=0
+seen_focus=0
+
+tick=0
+while :; do
+  BUF=''
+
+  # erase last frame's footprints
+  for i in "${!sx[@]}"; do
+    erase_at "${spy[i]}" "${spx[i]}" "${skind[i]}"
+  done
+
+  # advance, and drop anything that has left the screen
+  declare -a nx=() ny=() nkind=() nspeed=() nflap=() npx=() npy=() ndone=()
+  for i in "${!sx[@]}"; do
+    x=${sx[i]} y=${sy[i]} px=$x py=$y flap=${sflap[i]}
+    if ((${sspeed[i]} > 1 || tick % 2 == 0)); then
+      x=$((x - 2))                            # 2:1 keeps the dive at ~45°
+      y=$((y + 1))
+      flap=$((flap + 1))
+    fi
+    ((x < -TOASTER_W || y > ROWS)) && continue         # off the edge: gone
+    n=${#nx[@]}
+    nx[n]=$x ny[n]=$y nkind[n]=${skind[i]} nspeed[n]=${sspeed[i]}
+    nflap[n]=$flap npx[n]=$px npy[n]=$py ndone[n]=${sdone[i]}
+  done
+  sx=("${nx[@]}") sy=("${ny[@]}") skind=("${nkind[@]}") sspeed=("${nspeed[@]}")
+  sflap=("${nflap[@]}") spx=("${npx[@]}") spy=("${npy[@]}") sdone=("${ndone[@]}")
+
+  # new arrivals
+  if ((${#sx[@]} < MAX_SPRITES && RANDOM % 100 < SPAWN_PCT)); then
+    spawn
+  fi
+
+  # draw this frame
+  for i in "${!sx[@]}"; do
+    draw_at "${sy[i]}" "${sx[i]}" "${skind[i]}" "${sspeed[i]}" "${sflap[i]}" "${sdone[i]}"
+    spx[i]=${sx[i]} spy[i]=${sy[i]}
+  done
+
+  printf '%s%s[0m' "$BUF" "$ESC"
+
+  tick=$((tick + 1))
+
+  # End of the startup grace period: drop whatever the terminal said while it
+  # was settling, then start listening to the mouse.
+  if ((tick == GRACE_FRAMES)); then
+    while read -rsn1 -t 0 _drain 2>/dev/null; do :; done
+    if [[ $SCREENSAVER == 1 ]]; then
+      printf '%s[?1003h' "$ESC"
+      mouse_on=1
+    fi
+  fi
+
+  # Only treat lost focus as a dismissal once the window has actually held
+  # focus: the compositor may not have handed it over when the first check runs.
+  if ((tick % 15 == 0)); then
+    if still_focused; then
+      seen_focus=1
+    elif ((seen_focus)); then
+      cleanup
+    fi
+  fi
+
+  # the frame delay doubles as the "any input quits" check
+  read_input
+done
