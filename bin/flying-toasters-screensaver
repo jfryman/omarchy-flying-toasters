@@ -9,8 +9,11 @@
 set -u
 
 # Resolve the animation next to this script, so the pair relocates as a unit
-# wherever the plugin is checked out.
-TOASTERS="$(cd -- "$(dirname -- "${BASH_SOURCE[0]}")" && pwd)/flying-toasters"
+# wherever the plugin is checked out. Follow symlinks first: this is commonly
+# reached through a link on PATH, and dirname of the link points at the link's
+# directory, not the plugin.
+SELF="$(readlink -f -- "${BASH_SOURCE[0]}" 2>/dev/null || echo "${BASH_SOURCE[0]}")"
+TOASTERS="$(cd -- "$(dirname -- "$SELF")" && pwd)/flying-toasters"
 CLASS="org.omarchy.screensaver"
 OMARCHY_PATH=${OMARCHY_PATH:-/usr/share/omarchy}
 
