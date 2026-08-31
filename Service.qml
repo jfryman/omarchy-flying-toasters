@@ -14,7 +14,7 @@ Item {
   readonly property string home: Quickshell.env("HOME")
   // Plugins are cloned to a path named by their manifest id, so this is where
   // our own files live. Same idiom the first-party plugins use.
-  readonly property string pluginDir: home + "/.config/omarchy/plugins/flying-toasters"
+  readonly property string pluginDir: home + "/.config/omarchy/plugins/jfryman.flying-toasters"
   readonly property string stayAwakeStateDir: home + "/.local/state/omarchy/indicators"
   readonly property string stayAwakeStatePath: stayAwakeStateDir + "/stay-awake"
   readonly property int defaultScreensaverSeconds: 150

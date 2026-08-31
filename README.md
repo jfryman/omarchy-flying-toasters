@@ -36,7 +36,7 @@ with one line repointed at `bin/flying-toasters-screensaver`.
 ## Uninstall
 
 ```bash
-omarchy plugin remove flying-toasters --yes
+omarchy plugin remove jfryman.flying-toasters --yes
 omarchy plugin enable omarchy.idle
 omarchy restart shell
 ```
