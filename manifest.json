@@ -5,12 +5,11 @@
   "version": "1.0.0",
   "author": "James Fryman",
   "license": "MIT",
-  "description": "Replaces the idle screensaver with the After Dark flying toasters, drawn in the terminal.",
+  "description": "The After Dark flying toasters as an Omarchy screensaver, drawn in the terminal.",
   "kinds": [
-    "service"
+    "screensaver"
   ],
-  "keepLoaded": true,
   "entryPoints": {
-    "service": "Service.qml"
+    "screensaver": "bin/flying-toasters-screensaver"
   }
 }

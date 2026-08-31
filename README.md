@@ -11,38 +11,37 @@ sprite sheet, sampled directly rather than eyeballed.
 
 ```bash
 omarchy plugin add https://github.com/jfryman/omarchy-flying-toasters.git --enable --yes
-omarchy plugin disable omarchy.idle
 omarchy restart shell
 ```
 
-## Why it replaces `omarchy.idle`
+## How it works
 
-Omarchy has no screensaver plugin kind, and the built-in idle service hardcodes
-`omarchy-launch-screensaver` — `idle.screensaver` in `shell.json` sets *when* the
-screensaver fires, not *what* runs. The only supported way to change what runs
-is to supply your own idle service, so this plugin is a fork of `omarchy.idle`
-with one line repointed at `bin/flying-toasters-screensaver`.
+This is a `screensaver`-kind plugin. Omarchy's idle service runs
+`bin/flying-toasters-screensaver` in place of the built-in terminal screensaver,
+the same way `bar.id` selects a bar plugin. Idle and lock timing stay with the
+stock idle service — this plugin does not fork it and has no QML at all.
 
-**Consequences worth knowing:**
+Requires the `screensaver` plugin kind, proposed upstream in
+`omacom/omarchy` (see the `screensaver-plugin-kind` branch of
+[jfryman/omarchy](https://github.com/jfryman/omarchy/tree/screensaver-plugin-kind)).
+Until that lands, use the `main` branch of this repo, which ships its own idle
+service instead.
 
-- This plugin owns your **lock screen** timing as well as the screensaver.
-  `idle.screensaver` and `idle.lock` in `shell.json` still work exactly as before.
-- Being a fork, it does not pick up upstream fixes to idle or lock behaviour.
-  After an Omarchy upgrade that touches the idle service, re-fork it:
-  `omarchy plugin clone omarchy.idle`, then reapply the one-line change.
-- Exactly one idle service should be enabled. Running both this and
-  `omarchy.idle` will start two screensavers and two lock timers.
+> **On an unpatched Omarchy this branch installs but does nothing.** The stock
+> plugin validator skips kinds it does not recognise rather than rejecting them,
+> so `omarchy plugin add` reports success and the shell then ignores the plugin.
+> There is no error to tell you why the toasters never appear. Use `main`.
 
 ## Uninstall
 
 ```bash
 omarchy plugin remove jfryman.flying-toasters --yes
-omarchy plugin enable omarchy.idle
 omarchy restart shell
 ```
 
-Re-enabling `omarchy.idle` is the important step — without an idle service your
-screen will never lock.
+Removing the plugin clears `idle.screensaverId`, so the built-in screensaver
+comes back. Lock behaviour is unaffected either way — the stock idle service
+owned it the whole time.
 
 ## Running it directly
 
