@@ -10,7 +10,7 @@ sprite sheet, sampled directly rather than eyeballed.
 ## Install
 
 ```bash
-omarchy plugin add https://github.com/<you>/omarchy-flying-toasters.git --enable --yes
+omarchy plugin add https://github.com/jfryman/omarchy-flying-toasters.git --enable --yes
 omarchy plugin disable omarchy.idle
 omarchy restart shell
 ```
