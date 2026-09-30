@@ -22,15 +22,27 @@ the same way `bar.id` selects a bar plugin. Idle and lock timing stay with the
 stock idle service — this plugin does not fork it and has no QML at all.
 
 Requires the `screensaver` plugin kind, proposed upstream in
-`omacom/omarchy` (see the `screensaver-plugin-kind` branch of
-[jfryman/omarchy](https://github.com/jfryman/omarchy/tree/screensaver-plugin-kind)).
-Until that lands, use the `main` branch of this repo, which ships its own idle
-service instead.
+[omacom/omarchy#9493](https://github.com/omacom/omarchy/pull/9493). Until that
+lands, the [`idle-service-fork`](https://github.com/jfryman/omarchy-flying-toasters/tree/idle-service-fork)
+branch of this repo ships its own idle service instead; its README explains how
+to install it.
 
-> **On an unpatched Omarchy this branch installs but does nothing.** The stock
+> **On an unpatched Omarchy this plugin installs but does nothing.** The stock
 > plugin validator skips kinds it does not recognise rather than rejecting them,
 > so `omarchy plugin add` reports success and the shell then ignores the plugin.
-> There is no error to tell you why the toasters never appear. Use `main`.
+> There is no error to tell you why the toasters never appear.
+
+### Upgrading from the idle-service version
+
+Early installs of this repo were the idle-service fork, installed alongside
+`omarchy plugin disable omarchy.idle`. `omarchy plugin update` moves such an
+install onto this version, which has no idle service of its own — so re-enable
+the stock one, or your screen will never lock:
+
+```bash
+omarchy plugin enable omarchy.idle
+omarchy restart shell
+```
 
 ## Uninstall
 
