@@ -7,13 +7,30 @@ trailed by the occasional slice of toast.
 Sprite shapes and colours are modelled on the original 1989 Berkeley Systems
 sprite sheet, sampled directly rather than eyeballed.
 
+> **This is the legacy branch.** `main` is now a `screensaver`-kind plugin that
+> needs [omacom/omarchy#9493](https://github.com/omacom/omarchy/pull/9493) and
+> leaves the stock idle service alone. Use this branch only on an Omarchy
+> without that plugin kind.
+
 ## Install
 
+`omarchy plugin add` always installs the default branch (`main`), so clone this
+branch into place yourself:
+
 ```bash
-omarchy plugin add https://github.com/jfryman/omarchy-flying-toasters.git --enable --yes
+git clone -b idle-service-fork https://github.com/jfryman/omarchy-flying-toasters.git \
+  ~/.config/omarchy/plugins/jfryman.flying-toasters
+omarchy-plugin-validate ~/.config/omarchy/plugins/jfryman.flying-toasters
+omarchy-shell shell rescanPlugins
+omarchy plugin enable jfryman.flying-toasters
 omarchy plugin disable omarchy.idle
 omarchy restart shell
 ```
+
+**Do not run `omarchy plugin update` on this install.** It pulls the default
+branch, which would move you onto `main` — a plugin with no idle service — while
+`omarchy.idle` is still disabled, and your screen would never lock. Update with
+`git -C ~/.config/omarchy/plugins/jfryman.flying-toasters pull` instead.
 
 ## Why it replaces `omarchy.idle`
 
