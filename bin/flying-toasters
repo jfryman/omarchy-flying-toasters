@@ -10,9 +10,10 @@
 #   FLYING_TOASTERS_SPAWN   spawn chance per frame, %     (default 18)
 #   FLYING_TOASTERS_TOAST   chance a spawn is toast, %    (default 25)
 #   FLYING_TOASTERS_GRACE   frames to ignore input at start (default 15)
-#   FLYING_TOASTERS_SCREENSAVER=1
+#   FLYING_TOASTERS_SCREENSAVER=1   (or pass --screensaver)
 #       screensaver mode: hides the Hyprland hardware cursor, dismisses on
-#       mouse movement, and exits when the screensaver window loses focus.
+#       mouse movement, exits when the screensaver window loses focus, and
+#       takes every monitor's screensaver window down with it.
 
 set -u
 
@@ -29,6 +30,7 @@ MAX_SPRITES=${FLYING_TOASTERS_MAX:-5}
 SPAWN_PCT=${FLYING_TOASTERS_SPAWN:-18}
 TOAST_PCT=${FLYING_TOASTERS_TOAST:-25}
 SCREENSAVER=${FLYING_TOASTERS_SCREENSAVER:-0}
+[[ ${1-} == --screensaver ]] && SCREENSAVER=1
 GRACE_FRAMES=${FLYING_TOASTERS_GRACE:-15}
 MOUSE_TOLERANCE=2
 SCREENSAVER_CLASS=${FLYING_TOASTERS_CLASS:-org.omarchy.screensaver}
@@ -269,6 +271,12 @@ cleanup() {
   [[ $SCREENSAVER == 1 ]] && printf '\033]111\007'   # restore theme background
   hw_cursor false
   clear
+  # One dismissal ends the screensaver on every monitor, not just this one.
+  # This kills our own terminal too, so ignore the hangup that comes back.
+  if [[ $SCREENSAVER == 1 ]]; then
+    trap '' SIGHUP SIGTERM
+    pkill -f "[${SCREENSAVER_CLASS:0:1}]${SCREENSAVER_CLASS:1}" 2>/dev/null
+  fi
   exit 0
 }
 trap cleanup SIGINT SIGTERM SIGHUP SIGQUIT EXIT
