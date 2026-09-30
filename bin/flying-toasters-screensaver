@@ -1,10 +1,10 @@
 #!/usr/bin/env bash
 # flying-toasters-screensaver — launch flying-toasters as the Omarchy screensaver.
 #
-# Drop-in replacement for `omarchy-launch-screensaver`: same window class, same
-# per-monitor launch, same "already running" and "screensaver disabled" guards,
-# so Hyprland's window rules and the shell's idle service keep working. Pass
-# `force` to start it even when the screensaver is toggled off.
+# Hands the per-monitor work to Omarchy's own launcher: one fullscreen
+# org.omarchy.screensaver terminal per monitor, each on that monitor's own
+# screensaver workspace, with the screensaver font config and focus restored
+# afterwards. Pass `force` to start it even when the screensaver is toggled off.
 
 set -u
 
@@ -14,90 +14,5 @@ set -u
 # directory, not the plugin.
 SELF="$(readlink -f -- "${BASH_SOURCE[0]}" 2>/dev/null || echo "${BASH_SOURCE[0]}")"
 TOASTERS="$(cd -- "$(dirname -- "$SELF")" && pwd)/flying-toasters"
-CLASS="org.omarchy.screensaver"
-OMARCHY_PATH=${OMARCHY_PATH:-/usr/share/omarchy}
 
-# Already flying? Leave it alone.
-pgrep -f "[o]rg.omarchy.screensaver" >/dev/null && exit 0
-
-# Honour the stock "screensaver off" toggle unless forced.
-if command -v omarchy-toggle-enabled >/dev/null 2>&1 &&
-  omarchy-toggle-enabled screensaver-off && [[ ${1-} != "force" ]]; then
-  exit 1
-fi
-
-[[ -x $TOASTERS ]] || {
-  echo "flying-toasters-screensaver: $TOASTERS is missing or not executable" >&2
-  exit 1
-}
-
-terminal=$(xdg-terminal-exec --print-id 2>/dev/null)
-case $terminal in
-*Alacritty* | *ghostty* | *foot* | *kitty*) ;;
-*)
-  if command -v omarchy-notification-send >/dev/null 2>&1; then
-    omarchy-notification-send -g ✋ "Screensaver only runs in Alacritty, Foot, Ghostty, or Kitty"
-  fi
-  exit 1
-  ;;
-esac
-
-hypr_focus_monitor() {
-  hyprctl dispatch "hl.dsp.focus({ monitor = \"$1\" })" >/dev/null 2>&1 ||
-    hyprctl dispatch focusmonitor "$1" >/dev/null
-}
-
-hypr_exec() {
-  local command
-  printf -v command '%q ' "$@"
-  hyprctl dispatch "hl.dsp.exec_cmd([[$command]])" >/dev/null 2>&1 ||
-    hyprctl dispatch exec -- bash -lc "$command" >/dev/null
-}
-
-SOCKET="$XDG_RUNTIME_DIR/hypr/$HYPRLAND_INSTANCE_SIGNATURE/.socket2.sock"
-
-# Listen for openwindow events before spawning, so a fast-mapping terminal
-# can't beat us to it.
-exec {events}< <(socat -U - "UNIX-CONNECT:$SOCKET" 2>/dev/null)
-
-# A new window maps on whatever monitor is focused right now, so wait for this
-# monitor's screensaver to appear before moving focus to the next one.
-wait_for_screensaver_window() {
-  local line deadline=$((SECONDS + 5))
-  while ((SECONDS < deadline)) && IFS= read -r -t $((deadline - SECONDS)) -u "$events" line; do
-    [[ $line == openwindow\>\>*,$CLASS,* ]] && return 0
-  done
-}
-
-focused=$(omarchy-hyprland-monitor-focused)
-
-for m in $(hyprctl monitors -j | jq -r '.[] | .name'); do
-  hypr_focus_monitor "$m"
-
-  case $terminal in
-  *Alacritty*)
-    hypr_exec alacritty --class="$CLASS" \
-      --config-file "$OMARCHY_PATH/default/alacritty/screensaver.toml" \
-      -e env FLYING_TOASTERS_SCREENSAVER=1 "$TOASTERS"
-    ;;
-  *ghostty*)
-    hypr_exec ghostty --class="$CLASS" \
-      --config-file="$OMARCHY_PATH/default/ghostty/screensaver" --font-size=18 \
-      -e env FLYING_TOASTERS_SCREENSAVER=1 "$TOASTERS"
-    ;;
-  *foot*)
-    hypr_exec foot --app-id="$CLASS" \
-      --config="$OMARCHY_PATH/default/foot/screensaver.ini" \
-      -e env FLYING_TOASTERS_SCREENSAVER=1 "$TOASTERS"
-    ;;
-  *kitty*)
-    hypr_exec kitty --class="$CLASS" --override font_size=18 \
-      --override window_padding_width=0 \
-      -e env FLYING_TOASTERS_SCREENSAVER=1 "$TOASTERS"
-    ;;
-  esac
-
-  wait_for_screensaver_window
-done
-
-hypr_focus_monitor "$focused"
+exec omarchy-launch-screensaver "$@" --exec "$TOASTERS" --screensaver

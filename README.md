@@ -46,8 +46,10 @@ owned it the whole time.
 ## Running it directly
 
 `bin/flying-toasters-screensaver` opens it full screen on every monitor, the same
-way the idle service does. Pass `force` to start it even when the screensaver is
-toggled off. Any key or mouse movement dismisses it.
+way the idle service does: it hands off to `omarchy-launch-screensaver --exec`, so
+each monitor gets its own screensaver workspace exactly like the built-in one.
+Pass `force` to start it even when the screensaver is toggled off. Any key or
+mouse movement dismisses it on every monitor at once.
 
 `bin/flying-toasters` is the animation itself and runs in any terminal. Tunables,
 all via environment:
